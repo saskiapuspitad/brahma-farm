@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="36" fill="#268049"/>
+  <ellipse cx="96" cy="104" rx="46" ry="58" fill="#fff"/>
+  <ellipse cx="96" cy="104" rx="46" ry="58" fill="none" stroke="#1f6b3d" stroke-width="4"/>
+  <circle cx="80" cy="86" r="6" fill="#1f6b3d"/>
+  <text x="96" y="176" font-family="system-ui,Arial" font-size="26" font-weight="700" fill="#fff" text-anchor="middle">BF</text>
+</svg>

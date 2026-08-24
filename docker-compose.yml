@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-brahma}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brahma_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-brahmafarm}
+    # Tidak diekspos ke host (hanya dipakai container web) agar tidak bentrok
+    # dengan PostgreSQL/aplikasi lain di VPS. Buka blok di bawah hanya bila perlu.
+    # ports:
+    #   - "127.0.0.1:5433:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-brahma}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-brahma}:${POSTGRES_PASSWORD:-brahma_secret}@db:5432/${POSTGRES_DB:-brahmafarm}?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set di .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set di .env}
+      NODE_ENV: production
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@brahmafarm.local}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?set di .env}
+      SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Super Admin}
+    # Hanya diakses lewat reverse proxy (nginx) di host. Port host 3001 → 3000 container.
+    # Ganti 3001 bila sudah dipakai aplikasi lain.
+    ports:
+      - "127.0.0.1:3001:3000"
+    # Buat skema tabel (db push), terapkan index/constraint khusus, seed, lalu start.
+    command: >
+      sh -c "npx prisma db push --skip-generate &&
+             npx prisma db execute --url \"$$DATABASE_URL\" --file prisma/migrations/manual_partial_indexes.sql &&
+             npx tsx prisma/seed.ts &&
+             npm run start"
+
+volumes:
+  db_data:

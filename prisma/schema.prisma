@@ -1,0 +1,672 @@
+// BrahmaFarm — Prisma schema (sumber kebenaran skema untuk migration)
+// Mengacu pada Bagian 4 DESIGN.md. Soft delete via deletedAt pada entitas domain.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ================= ENUMS =================
+// Catatan: Prisma mewajibkan setiap nilai enum berada di baris tersendiri.
+enum HouseStatus {
+  EMPTY
+  ACTIVE
+  SANITATION
+  INACTIVE
+}
+
+enum HouseType {
+  BATTERY
+  POSTAL
+  CAGE_FREE
+  OTHER
+}
+
+enum FlockStatus {
+  PREPARATION
+  ACTIVE
+  COMPLETED
+  CULLED
+}
+
+enum ProductionPhase {
+  PRE_LAY
+  EARLY_LAY
+  PEAK
+  LATE_LAY
+  SPENT
+}
+
+enum RearingType {
+  PULLET_REARED
+  DOC
+}
+
+enum RecordStatus {
+  DRAFT
+  SUBMITTED
+  VERIFIED
+  LOCKED
+}
+
+enum MovementType {
+  IN
+  OUT
+  CULL
+  MORTALITY_ADJ
+  CORRECTION
+}
+
+enum TreatmentStatus {
+  PLANNED
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum AlertStatus {
+  OPEN
+  ACKNOWLEDGED
+  RESOLVED
+}
+
+enum PeriodType {
+  DAILY
+  WEEKLY
+  MONTHLY
+  CYCLE
+}
+
+enum ImportType {
+  HOUSE
+  FLOCK
+  RECORDING
+  STANDARD
+  TREATMENT
+}
+
+enum ImportStatus {
+  PENDING
+  PROCESSING
+  DONE
+  FAILED
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  DELETE
+  LOCK
+  UNLOCK
+  VERIFY
+}
+
+// ================= AUTH & RBAC =================
+model User {
+  id           BigInt    @id @default(autoincrement())
+  email        String    @unique
+  fullName     String    @map("full_name")
+  passwordHash String    @map("password_hash")
+  phone        String?
+  isActive     Boolean   @default(true) @map("is_active")
+  lastLoginAt  DateTime? @map("last_login_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  deletedAt    DateTime? @map("deleted_at")
+
+  userRoles      UserRole[]
+  recordings     DailyRecord[]  @relation("recordedBy")
+  verified       DailyRecord[]  @relation("verifiedBy")
+  responsibleFor House[]        @relation("houseResponsible")
+  treatments     Treatment[]
+  followUps      AlertFollowUp[]
+  imports        ImportHistory[]
+  audits         AuditLog[]
+
+  @@map("users")
+}
+
+model Role {
+  id          BigInt @id @default(autoincrement())
+  code        String @unique // SUPER_ADMIN | FARM_ADMIN | HOUSE_OPERATOR
+  name        String
+  description String?
+  userRoles   UserRole[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  id     BigInt  @id @default(autoincrement())
+  userId BigInt  @map("user_id")
+  roleId BigInt  @map("role_id")
+  farmId BigInt? @map("farm_id")
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role   Role    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  farm   Farm?   @relation(fields: [farmId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId, farmId])
+  @@map("user_roles")
+}
+
+// ================= CORE ENTITIES =================
+model Farm {
+  id        BigInt    @id @default(autoincrement())
+  code      String    @unique
+  name      String
+  address   String?
+  city      String?
+  ownerName String?   @map("owner_name")
+  timezone  String    @default("Asia/Jakarta")
+  currency  String    @default("IDR")
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+  deletedAt DateTime? @map("deleted_at")
+
+  houses     House[]
+  flocks     Flock[]
+  feedTypes  FeedType[]
+  records    DailyRecord[]
+  treatments Treatment[]
+  alerts     Alert[]
+  userRoles  UserRole[]
+  settings   SystemSetting[]
+
+  @@map("farms")
+}
+
+model House {
+  id                BigInt      @id @default(autoincrement())
+  farmId            BigInt      @map("farm_id")
+  code              String
+  name              String
+  houseType         HouseType   @default(BATTERY) @map("house_type")
+  capacity          Int?
+  location          String?
+  responsibleUserId BigInt?     @map("responsible_user_id")
+  status            HouseStatus @default(EMPTY)
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+  deletedAt         DateTime?   @map("deleted_at")
+
+  farm            Farm              @relation(fields: [farmId], references: [id])
+  responsibleUser User?             @relation("houseResponsible", fields: [responsibleUserId], references: [id])
+  flocks          Flock[]
+  assignments     HouseAssignment[]
+  records         DailyRecord[]
+  treatments      Treatment[]
+  summaries       ProductivitySummary[]
+  alerts          Alert[]
+
+  @@unique([farmId, code])
+  @@index([farmId, status])
+  @@map("houses")
+}
+
+model Strain {
+  id          BigInt    @id @default(autoincrement())
+  code        String    @unique
+  name        String
+  breeder     String?
+  description String?
+  deletedAt   DateTime? @map("deleted_at")
+
+  flocks    Flock[]
+  standards PerformanceStandard[]
+
+  @@map("strains")
+}
+
+model Flock {
+  id                   BigInt          @id @default(autoincrement())
+  farmId               BigInt          @map("farm_id")
+  houseId              BigInt          @map("house_id")
+  code                 String
+  strainId             BigInt          @map("strain_id")
+  sourceSupplier       String?         @map("source_supplier")
+  hatchDate            DateTime        @map("hatch_date") @db.Date
+  entryDate            DateTime        @map("entry_date") @db.Date
+  entryAgeDays         Int?            @map("entry_age_days")
+  initialPopulation    Int             @map("initial_population")
+  rearingType          RearingType     @default(PULLET_REARED) @map("rearing_type")
+  productionPhase      ProductionPhase @default(PRE_LAY) @map("production_phase")
+  targetProductionNote String?         @map("target_production_note")
+  plannedCullDate      DateTime?       @map("planned_cull_date") @db.Date
+  actualCullDate       DateTime?       @map("actual_cull_date") @db.Date
+  status               FlockStatus     @default(PREPARATION)
+  notes                String?
+  createdAt            DateTime        @default(now()) @map("created_at")
+  updatedAt            DateTime        @updatedAt @map("updated_at")
+  deletedAt            DateTime?       @map("deleted_at")
+
+  farm        Farm                  @relation(fields: [farmId], references: [id])
+  house       House                 @relation(fields: [houseId], references: [id])
+  strain      Strain                @relation(fields: [strainId], references: [id])
+  assignments HouseAssignment[]
+  movements   FlockMovement[]
+  records     DailyRecord[]
+  treatments  Treatment[]
+  summaries   ProductivitySummary[]
+  alerts      Alert[]
+
+  @@unique([farmId, code])
+  @@index([houseId, status])
+  @@index([strainId])
+  @@map("flocks")
+}
+
+model HouseAssignment {
+  id             BigInt    @id @default(autoincrement())
+  houseId        BigInt    @map("house_id")
+  flockId        BigInt    @map("flock_id")
+  startDate      DateTime  @map("start_date") @db.Date
+  endDate        DateTime? @map("end_date") @db.Date
+  operatorUserId BigInt?   @map("operator_user_id")
+  note           String?
+
+  house House @relation(fields: [houseId], references: [id])
+  flock Flock @relation(fields: [flockId], references: [id])
+
+  @@index([houseId, startDate])
+  @@index([flockId])
+  @@map("house_assignments")
+}
+
+model FlockMovement {
+  id           BigInt       @id @default(autoincrement())
+  flockId      BigInt       @map("flock_id")
+  movementDate DateTime     @map("movement_date") @db.Date
+  movementType MovementType @map("movement_type")
+  quantity     Int
+  fromHouseId  BigInt?      @map("from_house_id")
+  toHouseId    BigInt?      @map("to_house_id")
+  reason       String?
+  createdBy    BigInt?      @map("created_by")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  flock Flock @relation(fields: [flockId], references: [id])
+
+  @@index([flockId, movementDate])
+  @@map("flock_movements")
+}
+
+// ================= RECORDING (raw) =================
+model DailyRecord {
+  id          BigInt       @id @default(autoincrement())
+  farmId      BigInt       @map("farm_id")
+  houseId     BigInt       @map("house_id")
+  flockId     BigInt       @map("flock_id")
+  recordDate  DateTime     @map("record_date") @db.Date
+  ageDays     Int?         @map("age_days")
+  recordedBy  BigInt?      @map("recorded_by")
+  recordedAt  DateTime     @default(now()) @map("recorded_at")
+  status      RecordStatus @default(SUBMITTED)
+  verifiedBy  BigInt?      @map("verified_by")
+  verifiedAt  DateTime?    @map("verified_at")
+  generalNote String?      @map("general_note")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+  deletedAt   DateTime?    @map("deleted_at")
+
+  farm         Farm                @relation(fields: [farmId], references: [id])
+  house        House               @relation(fields: [houseId], references: [id])
+  flock        Flock               @relation(fields: [flockId], references: [id])
+  recordedByUser User?             @relation("recordedBy", fields: [recordedBy], references: [id])
+  verifiedByUser User?             @relation("verifiedBy", fields: [verifiedBy], references: [id])
+  population   DailyPopulation?
+  eggs         EggProduction?
+  feed         FeedRecord?
+  water        WaterRecord?
+  environment  EnvironmentRecord?
+  summaries    ProductivitySummary[]
+
+  // Catatan: unique parsial (flockId, recordDate) WHERE deleted_at IS NULL
+  // ditambahkan via migration SQL manual (Prisma belum mendukung partial unique index penuh).
+  @@index([houseId, recordDate])
+  @@index([farmId, recordDate])
+  @@index([status])
+  @@map("daily_records")
+}
+
+model DailyPopulation {
+  id                BigInt @id @default(autoincrement())
+  dailyRecordId     BigInt @unique @map("daily_record_id")
+  openingPopulation Int    @map("opening_population")
+  mortality         Int    @default(0)
+  culling           Int    @default(0)
+  transferIn        Int    @default(0) @map("transfer_in")
+  transferOut       Int    @default(0) @map("transfer_out")
+  closingPopulation Int    @map("closing_population")
+
+  record DailyRecord @relation(fields: [dailyRecordId], references: [id], onDelete: Cascade)
+
+  @@map("daily_populations")
+}
+
+model EggProduction {
+  id             BigInt   @id @default(autoincrement())
+  dailyRecordId  BigInt   @unique @map("daily_record_id")
+  wholeEggs      Int      @default(0) @map("whole_eggs")
+  crackedEggs    Int      @default(0) @map("cracked_eggs")
+  brokenEggs     Int      @default(0) @map("broken_eggs")
+  dirtyEggs      Int      @default(0) @map("dirty_eggs")
+  abnormalEggs   Int      @default(0) @map("abnormal_eggs")
+  totalEggs      Int      @map("total_eggs")
+  totalWeightKg  Decimal  @default(0) @map("total_weight_kg") @db.Decimal(12, 3)
+  sampleWeightG  Decimal? @map("sample_weight_g") @db.Decimal(8, 2)
+  trays          Int?
+  gradeBreakdown Json?    @map("grade_breakdown")
+
+  record DailyRecord @relation(fields: [dailyRecordId], references: [id], onDelete: Cascade)
+
+  @@map("egg_productions")
+}
+
+model FeedRecord {
+  id             BigInt   @id @default(autoincrement())
+  dailyRecordId  BigInt   @unique @map("daily_record_id")
+  feedTypeId     BigInt?  @map("feed_type_id")
+  openingStockKg Decimal  @default(0) @map("opening_stock_kg") @db.Decimal(12, 3)
+  feedInKg       Decimal  @default(0) @map("feed_in_kg") @db.Decimal(12, 3)
+  feedGivenKg    Decimal  @default(0) @map("feed_given_kg") @db.Decimal(12, 3)
+  feedLeftoverKg Decimal  @default(0) @map("feed_leftover_kg") @db.Decimal(12, 3)
+  feedConsumedKg Decimal  @default(0) @map("feed_consumed_kg") @db.Decimal(12, 3)
+  batchCode      String?  @map("batch_code")
+  pricePerKg     Decimal? @map("price_per_kg") @db.Decimal(12, 2)
+
+  record   DailyRecord @relation(fields: [dailyRecordId], references: [id], onDelete: Cascade)
+  feedType FeedType?   @relation(fields: [feedTypeId], references: [id])
+
+  @@map("feed_records")
+}
+
+model WaterRecord {
+  id                BigInt   @id @default(autoincrement())
+  dailyRecordId     BigInt   @unique @map("daily_record_id")
+  waterConsumptionL Decimal? @map("water_consumption_l") @db.Decimal(12, 2)
+  note              String?
+
+  record DailyRecord @relation(fields: [dailyRecordId], references: [id], onDelete: Cascade)
+
+  @@map("water_records")
+}
+
+model EnvironmentRecord {
+  id              BigInt   @id @default(autoincrement())
+  dailyRecordId   BigInt   @unique @map("daily_record_id")
+  tempMin         Decimal? @map("temp_min") @db.Decimal(6, 2)
+  tempMax         Decimal? @map("temp_max") @db.Decimal(6, 2)
+  tempAvg         Decimal? @map("temp_avg") @db.Decimal(6, 2)
+  humidityPct     Decimal? @map("humidity_pct") @db.Decimal(6, 2)
+  thi             Decimal? @db.Decimal(6, 2)
+  lightHours      Decimal? @map("light_hours") @db.Decimal(5, 2)
+  ventilationNote String?  @map("ventilation_note")
+  weatherNote     String?  @map("weather_note")
+
+  record DailyRecord @relation(fields: [dailyRecordId], references: [id], onDelete: Cascade)
+
+  @@map("environment_records")
+}
+
+model FeedType {
+  id                BigInt    @id @default(autoincrement())
+  farmId            BigInt?   @map("farm_id")
+  code              String
+  name              String
+  phase             String?
+  defaultPricePerKg Decimal?  @map("default_price_per_kg") @db.Decimal(12, 2)
+  description       String?
+  deletedAt         DateTime? @map("deleted_at")
+
+  farm  Farm?        @relation(fields: [farmId], references: [id])
+  feeds FeedRecord[]
+
+  @@unique([farmId, code])
+  @@map("feed_types")
+}
+
+// ================= TREATMENT =================
+model TreatmentCategory {
+  id                 BigInt  @id @default(autoincrement())
+  code               String  @unique
+  name               String
+  requiresWithdrawal Boolean @default(false) @map("requires_withdrawal")
+
+  products   TreatmentProduct[]
+  treatments Treatment[]
+
+  @@map("treatment_categories")
+}
+
+model TreatmentProduct {
+  id                    BigInt    @id @default(autoincrement())
+  categoryId            BigInt    @map("category_id")
+  code                  String
+  name                  String
+  defaultDose           Decimal?  @map("default_dose") @db.Decimal(12, 3)
+  defaultDoseUnit       String?   @map("default_dose_unit")
+  defaultRoute          String?   @map("default_route")
+  defaultWithdrawalDays Int?      @map("default_withdrawal_days")
+  deletedAt             DateTime? @map("deleted_at")
+
+  category   TreatmentCategory @relation(fields: [categoryId], references: [id])
+  treatments Treatment[]
+
+  @@unique([categoryId, code])
+  @@map("treatment_products")
+}
+
+model Treatment {
+  id                BigInt          @id @default(autoincrement())
+  farmId            BigInt          @map("farm_id")
+  houseId           BigInt          @map("house_id")
+  flockId           BigInt          @map("flock_id")
+  categoryId        BigInt          @map("category_id")
+  productId         BigInt?         @map("product_id")
+  name              String
+  purpose           String?
+  dose              Decimal?        @db.Decimal(12, 3)
+  doseUnit          String?         @map("dose_unit")
+  route             String?
+  durationDays      Int?            @map("duration_days")
+  startDate         DateTime        @map("start_date") @db.Date
+  endDate           DateTime?       @map("end_date") @db.Date
+  withdrawalDays    Int?            @map("withdrawal_days")
+  withdrawalUntil   DateTime?       @map("withdrawal_until") @db.Date
+  responsibleUserId BigInt?         @map("responsible_user_id")
+  cost              Decimal?        @db.Decimal(14, 2)
+  observationNote   String?         @map("observation_note")
+  status            TreatmentStatus @default(PLANNED)
+  createdAt         DateTime        @default(now()) @map("created_at")
+  updatedAt         DateTime        @updatedAt @map("updated_at")
+  deletedAt         DateTime?       @map("deleted_at")
+
+  farm            Farm              @relation(fields: [farmId], references: [id])
+  house           House             @relation(fields: [houseId], references: [id])
+  flock           Flock             @relation(fields: [flockId], references: [id])
+  category        TreatmentCategory @relation(fields: [categoryId], references: [id])
+  product         TreatmentProduct? @relation(fields: [productId], references: [id])
+  responsibleUser User?             @relation(fields: [responsibleUserId], references: [id])
+  followUps       AlertFollowUp[]
+
+  @@index([flockId, startDate])
+  @@index([withdrawalUntil])
+  @@map("treatments")
+}
+
+// ================= STANDARD & SUMMARY =================
+model PerformanceStandard {
+  id                BigInt   @id @default(autoincrement())
+  strainId          BigInt   @map("strain_id")
+  ageWeek           Int      @map("age_week")
+  hdpTarget         Decimal? @map("hdp_target") @db.Decimal(7, 3)
+  feedIntakeTargetG Decimal? @map("feed_intake_target_g") @db.Decimal(8, 2)
+  eggWeightTargetG  Decimal? @map("egg_weight_target_g") @db.Decimal(7, 2)
+  eggMassTargetG    Decimal? @map("egg_mass_target_g") @db.Decimal(8, 2)
+  fcrTarget         Decimal? @map("fcr_target") @db.Decimal(6, 3)
+  bodyWeightTargetG Decimal? @map("body_weight_target_g") @db.Decimal(8, 1)
+  maxMortalityPct   Decimal? @map("max_mortality_pct") @db.Decimal(6, 3)
+  sourceLabel       String?  @map("source_label")
+
+  strain Strain @relation(fields: [strainId], references: [id])
+
+  @@unique([strainId, ageWeek])
+  @@map("performance_standards")
+}
+
+model ProductivitySummary {
+  id               BigInt     @id @default(autoincrement())
+  flockId          BigInt     @map("flock_id")
+  houseId          BigInt     @map("house_id")
+  dailyRecordId    BigInt?    @map("daily_record_id")
+  periodType       PeriodType @map("period_type")
+  periodKey        String     @map("period_key")
+  periodStart      DateTime   @map("period_start") @db.Date
+  periodEnd        DateTime   @map("period_end") @db.Date
+  ageDays          Int?       @map("age_days")
+  ageWeek          Int?       @map("age_week")
+  avgPopulation    Decimal?   @map("avg_population") @db.Decimal(12, 2)
+  totalEggs        Int?       @map("total_eggs")
+  totalEggWeightKg Decimal?   @map("total_egg_weight_kg") @db.Decimal(14, 3)
+  hdpPct           Decimal?   @map("hdp_pct") @db.Decimal(7, 3)
+  hhpPct           Decimal?   @map("hhp_pct") @db.Decimal(7, 3)
+  eggMassG         Decimal?   @map("egg_mass_g") @db.Decimal(8, 3)
+  feedIntakeG      Decimal?   @map("feed_intake_g") @db.Decimal(8, 2)
+  fcr              Decimal?   @db.Decimal(8, 4)
+  avgEggWeightG    Decimal?   @map("avg_egg_weight_g") @db.Decimal(7, 2)
+  mortalityPct     Decimal?   @map("mortality_pct") @db.Decimal(7, 4)
+  cumMortalityPct  Decimal?   @map("cum_mortality_pct") @db.Decimal(7, 4)
+  depletionPct     Decimal?   @map("depletion_pct") @db.Decimal(7, 4)
+  crackedPct       Decimal?   @map("cracked_pct") @db.Decimal(7, 3)
+  dirtyPct         Decimal?   @map("dirty_pct") @db.Decimal(7, 3)
+  feedConsumedKg   Decimal?   @map("feed_consumed_kg") @db.Decimal(14, 3)
+  feedCost         Decimal?   @map("feed_cost") @db.Decimal(16, 2)
+  isStale          Boolean    @default(false) @map("is_stale")
+  computedAt       DateTime   @default(now()) @map("computed_at")
+
+  flock  Flock        @relation(fields: [flockId], references: [id])
+  house  House        @relation(fields: [houseId], references: [id])
+  record DailyRecord? @relation(fields: [dailyRecordId], references: [id])
+
+  @@unique([flockId, periodType, periodKey])
+  @@index([flockId, periodType, periodStart])
+  @@map("productivity_summaries")
+}
+
+// ================= ALERTS / ATTACH / IMPORT / AUDIT / SETTINGS =================
+model Alert {
+  id         BigInt        @id @default(autoincrement())
+  farmId     BigInt        @map("farm_id")
+  houseId    BigInt?       @map("house_id")
+  flockId    BigInt?       @map("flock_id")
+  alertType  String        @map("alert_type")
+  severity   AlertSeverity @default(INFO)
+  status     AlertStatus   @default(OPEN)
+  recordDate DateTime?     @map("record_date") @db.Date
+  message    String
+  context    Json?
+  createdAt  DateTime      @default(now()) @map("created_at")
+
+  farm      Farm            @relation(fields: [farmId], references: [id])
+  house     House?          @relation(fields: [houseId], references: [id])
+  flock     Flock?          @relation(fields: [flockId], references: [id])
+  followUps AlertFollowUp[]
+
+  @@index([farmId, status, severity])
+  @@index([recordDate])
+  @@map("alerts")
+}
+
+model AlertFollowUp {
+  id          BigInt       @id @default(autoincrement())
+  alertId     BigInt       @map("alert_id")
+  userId      BigInt?      @map("user_id")
+  actionNote  String?      @map("action_note")
+  newStatus   AlertStatus? @map("new_status")
+  treatmentId BigInt?      @map("treatment_id")
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  alert     Alert      @relation(fields: [alertId], references: [id], onDelete: Cascade)
+  user      User?      @relation(fields: [userId], references: [id])
+  treatment Treatment? @relation(fields: [treatmentId], references: [id])
+
+  @@map("alert_follow_ups")
+}
+
+model Attachment {
+  id         BigInt   @id @default(autoincrement())
+  ownerType  String   @map("owner_type") // DAILY_RECORD | TREATMENT
+  ownerId    BigInt   @map("owner_id")
+  fileName   String   @map("file_name")
+  mimeType   String?  @map("mime_type")
+  sizeBytes  BigInt?  @map("size_bytes")
+  storagePath String  @map("storage_path")
+  uploadedBy BigInt?  @map("uploaded_by")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([ownerType, ownerId])
+  @@map("attachments")
+}
+
+model ImportHistory {
+  id              BigInt       @id @default(autoincrement())
+  userId          BigInt?      @map("user_id")
+  importType      ImportType   @map("import_type")
+  fileName        String?      @map("file_name")
+  totalRows       Int          @default(0) @map("total_rows")
+  successRows     Int          @default(0) @map("success_rows")
+  failedRows      Int          @default(0) @map("failed_rows")
+  status          ImportStatus @default(PENDING)
+  errorReportPath String?      @map("error_report_path")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  finishedAt      DateTime?    @map("finished_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@map("import_histories")
+}
+
+model AuditLog {
+  id         BigInt      @id @default(autoincrement())
+  userId     BigInt?     @map("user_id")
+  entityType String      @map("entity_type")
+  entityId   BigInt      @map("entity_id")
+  action     AuditAction
+  oldValues  Json?       @map("old_values")
+  newValues  Json?       @map("new_values")
+  reason     String?
+  ipAddress  String?     @map("ip_address")
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
+
+model SystemSetting {
+  id          BigInt   @id @default(autoincrement())
+  farmId      BigInt?  @map("farm_id")
+  key         String
+  value       Json
+  description String?
+  updatedBy   BigInt?  @map("updated_by")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  farm Farm? @relation(fields: [farmId], references: [id])
+
+  @@unique([farmId, key])
+  @@map("system_settings")
+}

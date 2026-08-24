@@ -1,0 +1,13 @@
+{
+  "name": "BrahmaFarm — Recording Ayam Petelur",
+  "short_name": "BrahmaFarm",
+  "description": "Sistem recording produksi ayam petelur multi-kandang",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#f7f8f7",
+  "theme_color": "#268049",
+  "lang": "id",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

@@ -6,12 +6,12 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-brahma}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-brahma_secret}
       POSTGRES_DB: ${POSTGRES_DB:-brahmafarm}
-    # Tidak diekspos ke host (hanya dipakai container web) agar tidak bentrok
-    # dengan PostgreSQL/aplikasi lain di VPS. Buka blok di bawah hanya bila perlu.
-    # ports:
-    #   - "127.0.0.1:5433:5432"
+    # Database tidak diekspos ke host (hanya dipakai container web) → tidak bentrok
+    # dengan PostgreSQL brahma-ps yang sudah ada di 127.0.0.1:5432.
     volumes:
       - db_data:/var/lib/postgresql/data
+    networks:
+      - default
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-brahma}"]
       interval: 5s
@@ -20,6 +20,7 @@ services:
 
   web:
     build: .
+    container_name: brahmafarm-web        # nama tetap → dipakai Caddy sebagai target proxy
     restart: unless-stopped
     depends_on:
       db:
@@ -29,19 +30,29 @@ services:
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?set di .env}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?set di .env}
       NODE_ENV: production
-      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@brahmafarm.local}
+      SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-admin@brahmaps.online}
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?set di .env}
       SEED_ADMIN_NAME: ${SEED_ADMIN_NAME:-Super Admin}
-    # Hanya diakses lewat reverse proxy (nginx) di host. Port host 3001 → 3000 container.
-    # Ganti 3001 bila sudah dipakai aplikasi lain.
+    networks:
+      - default        # untuk koneksi ke db
+      - webproxy       # agar Caddy (brahma-ps) bisa menjangkau container ini
+    # Opsional: buka untuk uji lokal via curl http://127.0.0.1:3001 (tidak publik).
     ports:
       - "127.0.0.1:3001:3000"
-    # Buat skema tabel (db push), terapkan index/constraint khusus, seed, lalu start.
+    # Buat skema tabel (db push) → index/constraint → seed → start.
     command: >
       sh -c "npx prisma db push --skip-generate &&
              npx prisma db execute --url \"$$DATABASE_URL\" --file prisma/migrations/manual_partial_indexes.sql &&
              npx tsx prisma/seed.ts &&
              npm run start"
+
+networks:
+  default:
+  # Network milik stack brahma-ps (tempat Caddy berada). Dipakai bersama agar
+  # Caddy dapat mem-proxy ke container BrahmaFarm lewat nama 'brahmafarm-web'.
+  webproxy:
+    external: true
+    name: brahma-ps_default
 
 volumes:
   db_data:

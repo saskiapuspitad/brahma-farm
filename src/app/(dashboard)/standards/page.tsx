@@ -40,6 +40,13 @@ export default function StandardsPage() {
     setCsv(""); load();
   }
 
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setMsg(null);
+    setCsv(await file.text());
+  }
+
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold">Standar Performa</h1>
@@ -48,6 +55,11 @@ export default function StandardsPage() {
 
       <Card title="Impor CSV">
         <p className="text-xs text-gray-500 mb-2">Format kolom: <code className="text-xs">strain_code, age_week, hdp_target, feed_intake_target_g, egg_weight_target_g, egg_mass_target_g, fcr_target, body_weight_target_g, max_mortality_pct, source_label</code></p>
+        <div className="mb-2 flex items-center gap-2">
+          <label className="text-sm font-medium">Unggah file CSV:</label>
+          <input type="file" accept=".csv,text/csv" onChange={onFile} className="text-sm" />
+        </div>
+        <p className="text-xs text-gray-400 mb-1">Atau tempel isi CSV di bawah ini:</p>
         <textarea value={csv} onChange={(e) => setCsv(e.target.value)} rows={5}
           className="w-full border rounded-lg px-3 py-2 font-mono text-xs" placeholder={TEMPLATE} />
         <div className="flex gap-2 mt-2">

@@ -59,7 +59,12 @@ export default function FlockDetailPage({ params }: { params: Promise<{ id: stri
     setBusy(true); setMsg(null);
     const res = await apiPost(`/api/flocks/${id}/activate`, {});
     setBusy(false);
-    if (!res.ok) { setMsg({ kind: "error", text: res.error?.message ?? "Gagal" }); return; }
+    if (!res.ok) {
+      // Tampilkan alasan rinci dari server, bukan hanya judul error.
+      const reasons = res.error?.details?.map((x) => x.message).join(" · ");
+      setMsg({ kind: "error", text: [res.error?.message ?? "Gagal", reasons].filter(Boolean).join(": ") });
+      return;
+    }
     setMsg({ kind: "success", text: "Flock diaktifkan" }); load();
   }
   function done(text: string) {
@@ -128,7 +133,9 @@ export default function FlockDetailPage({ params }: { params: Promise<{ id: stri
           ) : <p className="text-sm text-gray-500">Belum ada recording untuk siklus ini.</p>}
         </Card>
 
-        <Card title="HDP & FCR vs Umur">
+        <Card title="HDP & FCR vs Umur" action={
+          <Link href={`/reports/flock?flockId=${f.id}`} className="text-sm text-brand-700 hover:underline">Grafik lengkap →</Link>
+        }>
           {chart.length ? (
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={chart}>

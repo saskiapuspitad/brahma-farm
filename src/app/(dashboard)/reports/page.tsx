@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { apiGet } from "@/lib/client";
 import { Card, Button, Field, Select, Input } from "@/components/ui";
 
@@ -43,7 +44,10 @@ export default function ReportsPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-2xl font-bold">Laporan & Ekspor</h1>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-2xl font-bold">Laporan & Ekspor</h1>
+        <Link href="/reports/flock" className="text-sm text-brand-700 hover:underline">Lihat grafik per flock →</Link>
+      </div>
 
       <Card>
         <div className="grid md:grid-cols-5 gap-3 items-end">

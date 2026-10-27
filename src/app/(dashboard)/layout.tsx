@@ -9,6 +9,7 @@ const NAV = [
   { href: "/treatments", label: "Perlakuan" },
   { href: "/standards", label: "Standar Performa" },
   { href: "/alerts", label: "Peringatan" },
+  { href: "/reports/flock", label: "Grafik Flock" },
   { href: "/reports", label: "Laporan" },
   { href: "/imports", label: "Impor Data" },
   { href: "/users", label: "Pengguna" },
@@ -18,7 +19,7 @@ const NAV = [
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex">
-      <aside className="hidden md:flex w-56 flex-col bg-white border-r">
+      <aside className="hidden md:flex w-56 flex-col bg-white border-r print:hidden">
         <div className="px-4 py-4 border-b">
           <div className="font-bold text-brand-700">BrahmaFarm</div>
           <div className="text-xs text-gray-500">Produksi Ayam Petelur</div>
@@ -36,7 +37,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </form>
       </aside>
       <main className="flex-1 min-w-0">
-        <header className="md:hidden bg-white border-b px-4 py-3 font-bold text-brand-700">BrahmaFarm</header>
+        <header className="md:hidden bg-white border-b px-4 py-3 font-bold text-brand-700 print:hidden">BrahmaFarm</header>
         <div className="p-4 md:p-6">{children}</div>
       </main>
     </div>

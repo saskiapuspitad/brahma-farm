@@ -182,6 +182,7 @@ export default function FlocksPage() {
                     {canManageFlocks && f.status === "ACTIVE" && (
                       <button onClick={() => setDeactivating(f)} className="text-red-600 hover:underline mr-4">Nonaktifkan</button>
                     )}
+                    <Link href={`/reports/flock?flockId=${f.id}`} className="text-brand-700 hover:underline mr-4">Grafik</Link>
                     <Link href={`/flocks/${f.id}`} className="text-brand-700 hover:underline">Detail →</Link>
                   </td>
                 </tr>

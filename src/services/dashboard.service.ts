@@ -17,7 +17,11 @@ export async function getDashboard(
   const [activeHouses, activeFlocks, flocks] = await Promise.all([
     prisma.house.count({ where: { ...farmWhere, status: "ACTIVE", deletedAt: null } }),
     prisma.flock.count({ where: { ...farmWhere, status: "ACTIVE", deletedAt: null } }),
-    prisma.flock.findMany({ where: { ...farmWhere, status: "ACTIVE", deletedAt: null }, select: { id: true, houseId: true } }),
+    prisma.flock.findMany({
+      where: { ...farmWhere, status: "ACTIVE", deletedAt: null },
+      select: { id: true, code: true, houseId: true, house: { select: { code: true } } },
+      orderBy: [{ house: { code: "asc" } }, { code: "asc" }],
+    }),
   ]);
 
   const today = (opts.to ?? new Date().toISOString().slice(0, 10));
@@ -40,10 +44,11 @@ export async function getDashboard(
   const avgFcr = avg(dailySummaries.filter((s) => s.fcr != null).map((s) => Number(s.fcr)));
   const avgFeed = avg(dailySummaries.filter((s) => s.feedIntakeG != null).map((s) => Number(s.feedIntakeG)));
 
-  const recordedHouseIds = new Set(todayRecords.map((r) => r.houseId.toString()));
-  const pendingRecordHouses = flocks
-    .filter((f) => !recordedHouseIds.has(f.houseId.toString()))
-    .map((f) => ({ houseId: f.houseId.toString() }));
+  // Satu kandang bisa berisi beberapa flock aktif → status input dihitung per flock.
+  const recordedFlockIds = new Set(todayRecords.map((r) => r.flockId.toString()));
+  const pendingRecordFlocks = flocks
+    .filter((f) => !recordedFlockIds.has(f.id.toString()))
+    .map((f) => ({ flockId: f.id.toString(), flockCode: f.code, houseId: f.houseId.toString(), houseCode: f.house.code }));
 
   const openAlerts = await prisma.alert.findMany({
     where: { ...farmWhere, status: "OPEN" },
@@ -68,7 +73,7 @@ export async function getDashboard(
       activeHouses, activeFlocks, totalLivePopulation, eggsToday,
       avgHdp: round(avgHdp), avgFcr: round(avgFcr), avgFeedIntakeG: round(avgFeed), mortalityToday,
     },
-    pendingRecordHouses,
+    pendingRecordFlocks,
     abnormalHouses: openAlerts.filter((a) => a.severity !== "INFO").map((a) => ({ houseId: a.houseId?.toString() ?? null, alert: a.alertType })),
     ongoingTreatments,
     withdrawalWarnings,

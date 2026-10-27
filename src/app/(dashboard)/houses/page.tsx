@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { apiGet, apiPost } from "@/lib/client";
 import { Card, Button, Field, Input, Select, Alert, StatusBadge } from "@/components/ui";
 import { fmtInt } from "@/lib/format";
@@ -84,7 +85,14 @@ export default function HousesPage() {
                   <td>{h.name}</td>
                   <td><StatusBadge status={h.status} /></td>
                   <td>{fmtInt(h.capacity)}</td>
-                  <td>{h.flocks[0]?.code ?? "—"}</td>
+                  <td>
+                    {h.flocks.length === 0 ? "—" : h.flocks.map((f, i) => (
+                      <span key={f.id}>
+                        {i > 0 && ", "}
+                        <Link href={`/flocks/${f.id}`} className="text-brand-700 hover:underline">{f.code}</Link>
+                      </span>
+                    ))}
+                  </td>
                   <td>{h.responsibleUser?.fullName ?? "—"}</td>
                 </tr>
               ))}

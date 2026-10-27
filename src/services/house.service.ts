@@ -23,7 +23,8 @@ export async function listHouses(principal: AuthPrincipal, opts: { farmId?: stri
   return prisma.house.findMany({
     where,
     include: {
-      flocks: { where: { status: "ACTIVE", deletedAt: null }, select: { id: true, code: true }, take: 1 },
+      // Satu kandang bisa berisi beberapa flock aktif (mis. A1 & A2).
+      flocks: { where: { status: "ACTIVE", deletedAt: null }, select: { id: true, code: true }, orderBy: { code: "asc" } },
       responsibleUser: { select: { fullName: true } },
     },
     orderBy: { code: "asc" },

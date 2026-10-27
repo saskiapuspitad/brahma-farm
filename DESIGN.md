@@ -86,7 +86,7 @@ Model akses: **RBAC** dengan cakupan data (data scoping). Peran menentukan *aksi
 ## 1.4 Asumsi
 
 1. Satu recording utama per (flock, tanggal). Sub-data (populasi, telur, pakan, air, lingkungan) melekat pada recording tersebut.
-2. Satu flock menempati tepat satu kandang pada satu waktu; satu kandang menampung satu flock aktif pada satu waktu (flock lama harus `selesai`/`afkir` sebelum flock baru `aktif` di kandang yang sama). Histori assignment disimpan di `house_assignments`.
+2. Satu flock menempati tepat satu kandang pada satu waktu; satu kandang boleh menampung **beberapa flock aktif** sekaligus dengan umur berbeda (mis. kandang A berisi flock A1 dan A2). Recording, populasi, dan indikator selalu dihitung per flock. Kandang menjadi `sanitasi` setelah flock aktif terakhir di dalamnya `selesai`/`afkir`. Histori assignment disimpan di `house_assignments`.
 3. Tanggal menetas diketahui; umur dihitung dari sana. Jika hanya umur-saat-masuk yang diketahui, tanggal menetas diturunkan mundur.
 4. Berat telur diinput dalam **kg** (berat total), telur dalam **butir** — konsisten dengan buku recording lapangan.
 5. Konsumsi air & sebagian data lingkungan bersifat opsional (nullable).
@@ -578,8 +578,8 @@ CREATE TABLE house_assignments (
   note TEXT,
   CHECK (end_date IS NULL OR end_date >= start_date)
 );
--- hanya satu flock aktif per kandang
-CREATE UNIQUE INDEX uq_active_assignment ON house_assignments(house_id) WHERE end_date IS NULL;
+-- satu penempatan terbuka per flock (kandang boleh berisi beberapa flock aktif)
+CREATE UNIQUE INDEX uq_open_assignment_per_flock ON house_assignments(flock_id) WHERE end_date IS NULL;
 
 CREATE TABLE flock_movements (
   id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,

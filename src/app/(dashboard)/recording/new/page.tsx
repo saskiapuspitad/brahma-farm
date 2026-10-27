@@ -1,14 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { closingPopulation } from "@/domain/indicators/population";
 import { computeDailyIndicators } from "@/domain/indicators/formulas";
 import { fmtInt, fmtNum, fmtPct } from "@/lib/format";
 import { addToOutbox, saveDraft, loadDraft, clearDraft } from "@/lib/offline";
 
-interface House { id: string; code: string; name: string; status: string }
+interface ActiveFlock {
+  id: string; code: string; houseId: string; ageLabel: string;
+  house: { code: string; name: string }; strain: { name: string };
+}
 interface Prefill {
   flock: { id: string; code: string; strain: string };
+  house: { id: string; code: string; name: string };
   ageDays: number; ageWeek: number; ageLabel: string;
   openingPopulation: number;
   defaults: { feedTypeId: string | null; openingStockKg: number; pricePerKg: number | null };
@@ -18,8 +22,10 @@ interface Prefill {
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
 export default function RecordingNewPage() {
-  const [houses, setHouses] = useState<House[]>([]);
-  const [houseId, setHouseId] = useState("");
+  // Satu kandang bisa berisi beberapa flock aktif (mis. A1 & A2), jadi recording dipilih per flock.
+  const [flocks, setFlocks] = useState<ActiveFlock[]>([]);
+  const [flockId, setFlockId] = useState("");
+  const [doneFlockIds, setDoneFlockIds] = useState<Set<string>>(new Set());
   const [date, setDate] = useState(todayStr());
   const [prefill, setPrefill] = useState<Prefill | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -31,13 +37,37 @@ export default function RecordingNewPage() {
   const [feed, setFeed] = useState({ given: 0, leftover: 0, consumed: 0, pricePerKg: 0 });
 
   useEffect(() => {
-    fetch("/api/houses?status=ACTIVE").then((r) => r.json()).then((j) => j.success && setHouses(j.data));
+    fetch("/api/flocks?status=ACTIVE").then((r) => r.json()).then((j) => {
+      if (!j.success) return;
+      const sorted = [...(j.data as ActiveFlock[])].sort((a, b) =>
+        a.house.code.localeCompare(b.house.code, "id", { numeric: true }) ||
+        a.code.localeCompare(b.code, "id", { numeric: true }));
+      setFlocks(sorted);
+    });
   }, []);
 
+  // Tandai flock yang sudah direcord pada tanggal terpilih.
+  async function loadDone(d: string) {
+    const j = await fetch(`/api/recordings?from=${d}&to=${d}&pageSize=100`).then((r) => r.json()).catch(() => null);
+    if (j?.success) setDoneFlockIds(new Set((j.data as { flockId: string }[]).map((r) => r.flockId)));
+  }
+  useEffect(() => { if (date) loadDone(date); }, [date]);
+
+  // Kelompokkan flock per kandang untuk dropdown.
+  const byHouse = useMemo(() => {
+    const m = new Map<string, { label: string; items: ActiveFlock[] }>();
+    for (const f of flocks) {
+      const g = m.get(f.houseId) ?? { label: `${f.house.code} — ${f.house.name}`, items: [] };
+      g.items.push(f);
+      m.set(f.houseId, g);
+    }
+    return [...m.values()];
+  }, [flocks]);
+
   useEffect(() => {
-    if (!houseId || !date) return;
+    if (!flockId || !date) return;
     setMsg(null);
-    fetch(`/api/recordings/prefill?houseId=${houseId}&date=${date}`)
+    fetch(`/api/recordings/prefill?flockId=${flockId}&date=${date}`)
       .then((r) => r.json())
       .then((j) => {
         if (j.success) {
@@ -45,10 +75,10 @@ export default function RecordingNewPage() {
           setPop((p) => ({ ...p, opening: j.data.openingPopulation }));
           setFeed((f) => ({ ...f, pricePerKg: j.data.defaults.pricePerKg ?? 0 }));
         } else {
-          setPrefill(null); setMsg(j.error?.message ?? "Tidak ada flock aktif");
+          setPrefill(null); setMsg(j.error?.message ?? "Flock tidak dapat dimuat");
         }
       });
-  }, [houseId, date]);
+  }, [flockId, date]);
 
   const totalEggs = eggs.whole + eggs.cracked + eggs.broken + eggs.dirty + eggs.abnormal;
   const consumed = feed.consumed > 0 ? feed.consumed : Math.max(0, feed.given - feed.leftover);
@@ -66,32 +96,50 @@ export default function RecordingNewPage() {
     pricePerKg: feed.pricePerKg || null, basis: "OPENING",
   }), [pop, eggs, feed, closing, totalEggs, consumed, prefill]);
 
-  // Autosave draft per kandang+tanggal (untuk pemulihan bila halaman tertutup).
+  // Autosave draft per flock+tanggal (untuk pemulihan bila halaman tertutup).
+  // Autosave baru aktif setelah draft untuk kunci ini dipulihkan, supaya draft lama tidak tertimpa nilai kosong.
+  const draftKey = `flock:${flockId}:${date}`;
+  const restoredKey = useRef<string | null>(null);
   useEffect(() => {
-    if (!houseId || !date) return;
-    saveDraft(`${houseId}:${date}`, { pop, eggs, feed });
-  }, [houseId, date, pop, eggs, feed]);
+    if (!flockId || !date || restoredKey.current !== draftKey) return;
+    saveDraft(draftKey, { pop, eggs, feed });
+  }, [draftKey, flockId, date, pop, eggs, feed]);
 
-  // Pulihkan draft saat ganti kandang/tanggal.
+  // Pulihkan draft saat ganti flock/tanggal.
   useEffect(() => {
-    if (!houseId || !date) return;
-    const d = loadDraft<{ pop: typeof pop; eggs: typeof eggs; feed: typeof feed }>(`${houseId}:${date}`);
+    if (!flockId || !date) return;
+    const d = loadDraft<{ pop: typeof pop; eggs: typeof eggs; feed: typeof feed }>(draftKey);
     if (d) { setPop(d.pop); setEggs(d.eggs); setFeed(d.feed); }
+    restoredKey.current = draftKey;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [houseId, date]);
+  }, [flockId, date]);
 
-  function advance() {
+  function resetForm() {
+    setPop({ opening: 0, mortality: 0, culling: 0, transferIn: 0, transferOut: 0 });
     setEggs({ whole: 0, cracked: 0, broken: 0, dirty: 0, abnormal: 0, weightKg: 0 });
-    const idx = houses.findIndex((h) => h.id === houseId);
-    const nextHouse = houses[idx + 1];
-    if (nextHouse) setHouseId(nextHouse.id);
+    setFeed({ given: 0, leftover: 0, consumed: 0, pricePerKg: 0 });
+  }
+
+  function selectFlock(id: string) {
+    resetForm();
+    setPrefill(null);
+    setFlockId(id);
+  }
+
+  /** Lanjut ke flock berikutnya yang belum direcord (bisa di kandang yang sama, mis. A1 → A2). */
+  function advance(justSavedId: string) {
+    const done = new Set(doneFlockIds).add(justSavedId);
+    const idx = flocks.findIndex((f) => f.id === justSavedId);
+    const next = [...flocks.slice(idx + 1), ...flocks.slice(0, idx)].find((f) => !done.has(f.id));
+    if (next) selectFlock(next.id);
+    else setMsg((m) => (m ? m + " Semua flock aktif sudah direcord untuk tanggal ini." : m));
   }
 
   async function save(next: boolean) {
     if (!prefill) return;
     setSaving(true); setMsg(null);
     const body = {
-      houseId, flockId: prefill.flock.id, recordDate: date,
+      houseId: prefill.house.id, flockId: prefill.flock.id, recordDate: date,
       population: { openingPopulation: pop.opening, mortality: pop.mortality, culling: pop.culling, transferIn: pop.transferIn, transferOut: pop.transferOut },
       eggs: { wholeEggs: eggs.whole, crackedEggs: eggs.cracked, brokenEggs: eggs.broken, dirtyEggs: eggs.dirty, abnormalEggs: eggs.abnormal, totalWeightKg: eggs.weightKg },
       feed: { feedGivenKg: feed.given, feedLeftoverKg: feed.leftover, feedConsumedKg: consumed, pricePerKg: feed.pricePerKg || undefined },
@@ -103,16 +151,17 @@ export default function RecordingNewPage() {
       });
       const j = await res.json();
       if (!j.success) { setMsg("⚠ " + (j.error?.message ?? "Gagal menyimpan")); return; }
-      setMsg("✓ Recording tersimpan. Populasi akhir " + fmtInt(j.data.closingPopulation));
-      clearDraft(`${houseId}:${date}`);
-      if (next) advance();
+      setMsg(`✓ Recording ${prefill.flock.code} tersimpan. Populasi akhir ${fmtInt(j.data.closingPopulation)}.`);
+      clearDraft(draftKey);
+      setDoneFlockIds((s) => new Set(s).add(prefill.flock.id));
+      if (next) advance(prefill.flock.id);
     } catch {
       // Offline / jaringan gagal → simpan ke outbox untuk sinkron otomatis nanti.
       addToOutbox(body);
       if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("brahmafarm:outbox"));
-      setMsg("📴 Offline — recording disimpan lokal & akan dikirim otomatis saat online.");
-      clearDraft(`${houseId}:${date}`);
-      if (next) advance();
+      setMsg(`📴 Offline — recording ${prefill.flock.code} disimpan lokal & akan dikirim otomatis saat online.`);
+      clearDraft(draftKey);
+      if (next) advance(prefill.flock.id);
     } finally { setSaving(false); }
   }
 
@@ -124,19 +173,32 @@ export default function RecordingNewPage() {
         <Field label="Tanggal">
           <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="w-full border rounded-lg px-3 py-2" />
         </Field>
-        <Field label="Kandang">
-          <select value={houseId} onChange={(e) => setHouseId(e.target.value)} className="w-full border rounded-lg px-3 py-2">
-            <option value="">— pilih kandang —</option>
-            {houses.map((h) => <option key={h.id} value={h.id}>{h.code} — {h.name}</option>)}
+        <Field label="Kandang / Flock">
+          <select value={flockId} onChange={(e) => selectFlock(e.target.value)} className="w-full border rounded-lg px-3 py-2">
+            <option value="">— pilih flock —</option>
+            {byHouse.map((g) => (
+              <optgroup key={g.label} label={`Kandang ${g.label}`}>
+                {g.items.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.code} · {f.ageLabel}{doneFlockIds.has(f.id) ? " ✓ sudah" : ""}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
           </select>
+          {flocks.length > 0 && (
+            <p className="text-xs text-gray-500 mt-1">
+              {flocks.filter((f) => doneFlockIds.has(f.id)).length} dari {flocks.length} flock aktif sudah direcord
+            </p>
+          )}
         </Field>
         <div className="text-sm flex items-end">
           {prefill ? (
             <div>
               <div className="font-medium">{prefill.flock.code} · {prefill.flock.strain}</div>
-              <div className="text-gray-500">Umur {prefill.ageLabel} ({prefill.ageDays} hari)</div>
+              <div className="text-gray-500">Kandang {prefill.house.code} · Umur {prefill.ageLabel} ({prefill.ageDays} hari)</div>
             </div>
-          ) : <span className="text-gray-400">Pilih kandang untuk memuat flock aktif</span>}
+          ) : <span className="text-gray-400">Pilih flock untuk memuat data</span>}
         </div>
       </div>
 
@@ -196,7 +258,7 @@ export default function RecordingNewPage() {
           </button>
           <button onClick={() => save(true)} disabled={saving}
             className="border border-brand-600 text-brand-700 rounded-lg px-4 py-2 font-medium">
-            Simpan &amp; lanjut kandang berikutnya →
+            Simpan &amp; lanjut flock berikutnya →
           </button>
         </div>
       )}

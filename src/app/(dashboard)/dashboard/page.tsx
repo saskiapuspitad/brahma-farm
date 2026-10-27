@@ -11,7 +11,7 @@ interface DashboardData {
     activeHouses: number; activeFlocks: number; totalLivePopulation: number; eggsToday: number;
     avgHdp: number | null; avgFcr: number | null; avgFeedIntakeG: number | null; mortalityToday: number;
   };
-  pendingRecordHouses: { houseId: string }[];
+  pendingRecordFlocks: { flockId: string; flockCode: string; houseId: string; houseCode: string }[];
   ongoingTreatments: number; withdrawalWarnings: number;
   alerts: { id: string; type: string; severity: string; message: string }[];
   charts: {
@@ -51,7 +51,9 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid md:grid-cols-3 gap-3">
-        <Info label="Kandang belum input" value={`${data.pendingRecordHouses.length}`} tone={data.pendingRecordHouses.length ? "warn" : "ok"} />
+        <Info label="Flock belum input hari ini" value={`${data.pendingRecordFlocks.length}`}
+          tone={data.pendingRecordFlocks.length ? "warn" : "ok"}
+          detail={data.pendingRecordFlocks.map((f) => `${f.flockCode} (${f.houseCode})`).join(", ")} />
         <Info label="Perlakuan berjalan" value={`${data.ongoingTreatments}`} tone="neutral" />
         <Info label="Withdrawal aktif" value={`${data.withdrawalWarnings}`} tone={data.withdrawalWarnings ? "warn" : "ok"} />
       </div>
@@ -109,9 +111,15 @@ function Kpi({ label, value, suffix }: { label: string; value: string; suffix?: 
   );
 }
 
-function Info({ label, value, tone }: { label: string; value: string; tone: "ok" | "warn" | "neutral" }) {
+function Info({ label, value, tone, detail }: { label: string; value: string; tone: "ok" | "warn" | "neutral"; detail?: string }) {
   const cls = tone === "warn" ? "border-amber-300 bg-amber-50" : tone === "ok" ? "border-green-200 bg-green-50" : "border-gray-200 bg-white";
-  return <div className={`rounded-xl border p-3 ${cls}`}><div className="text-xs text-gray-500">{label}</div><div className="text-lg font-bold">{value}</div></div>;
+  return (
+    <div className={`rounded-xl border p-3 ${cls}`}>
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className="text-lg font-bold">{value}</div>
+      {detail && <div className="text-xs text-gray-600 mt-0.5">{detail}</div>}
+    </div>
+  );
 }
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {

@@ -4,8 +4,14 @@ import { useEffect, useState, use } from "react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from "recharts";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { apiGet, apiPost } from "@/lib/client";
+import { useMe } from "@/lib/use-me";
 import { Card, Button, Alert, StatusBadge } from "@/components/ui";
+import {
+  DeactivateFlockDialog, ReopenFlockDialog, DeleteFlockDialog, EditFlockDialog,
+} from "@/components/flock-dialogs";
 import { fmtInt, fmtNum, fmtPct } from "@/lib/format";
 
 interface Summary { ageWeek: number | null; hdpPct: string | number | null; fcr: string | number | null }
@@ -13,6 +19,8 @@ interface Detail {
   flock: {
     id: string; code: string; status: string; initialPopulation: number;
     hatchDate: string; entryDate: string; sourceSupplier: string | null;
+    strainId: string; productionPhase: string; plannedCullDate: string | null;
+    actualCullDate: string | null; notes: string | null;
     strain: { name: string }; house: { code: string; name: string };
     assignments: { id: string; startDate: string; endDate: string | null; flock: { code: string } }[];
     summaries: Summary[];
@@ -24,7 +32,10 @@ interface Detail {
     feedConsumedKg: string | number | null; feedCost: string | number | null;
   } | null;
   treatmentCount: number;
+  recordCount: number;
 }
+
+type DialogKind = "edit" | "deactivate" | "reopen" | "delete" | null;
 
 const n = (v: string | number | null | undefined) => (v == null ? null : Number(v));
 
@@ -33,6 +44,9 @@ export default function FlockDetailPage({ params }: { params: Promise<{ id: stri
   const [d, setD] = useState<Detail | null>(null);
   const [msg, setMsg] = useState<{ kind: "error" | "success"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [dialog, setDialog] = useState<DialogKind>(null);
+  const { canManageFlocks } = useMe();
+  const router = useRouter();
 
   async function load() {
     const res = await apiGet<Detail>(`/api/flocks/${id}`);
@@ -48,12 +62,10 @@ export default function FlockDetailPage({ params }: { params: Promise<{ id: stri
     if (!res.ok) { setMsg({ kind: "error", text: res.error?.message ?? "Gagal" }); return; }
     setMsg({ kind: "success", text: "Flock diaktifkan" }); load();
   }
-  async function complete(status: "COMPLETED" | "CULLED") {
-    setBusy(true); setMsg(null);
-    const res = await apiPost(`/api/flocks/${id}/complete`, { status });
-    setBusy(false);
-    if (!res.ok) { setMsg({ kind: "error", text: res.error?.message ?? "Gagal" }); return; }
-    setMsg({ kind: "success", text: status === "COMPLETED" ? "Flock diselesaikan" : "Flock diafkir" }); load();
+  function done(text: string) {
+    setDialog(null);
+    setMsg({ kind: "success", text });
+    load();
   }
 
   if (!d) return <p className="text-gray-500">{msg ? msg.text : "Memuat…"}</p>;
@@ -64,7 +76,17 @@ export default function FlockDetailPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="space-y-4">
+      <Link href="/flocks" className="text-sm text-brand-700 hover:underline">← Daftar flock</Link>
       {msg && <Alert kind={msg.kind}>{msg.text}</Alert>}
+
+      {dialog === "edit" && (
+        <EditFlockDialog flock={f} recordCount={d.recordCount} onClose={() => setDialog(null)} onDone={done} />
+      )}
+      {dialog === "deactivate" && <DeactivateFlockDialog flock={f} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog === "reopen" && <ReopenFlockDialog flock={f} onClose={() => setDialog(null)} onDone={done} />}
+      {dialog === "delete" && (
+        <DeleteFlockDialog flock={f} onClose={() => setDialog(null)} onDone={() => router.push("/flocks")} />
+      )}
 
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -73,15 +95,22 @@ export default function FlockDetailPage({ params }: { params: Promise<{ id: stri
             <p className="text-sm text-gray-500">
               {f.strain.name} · Kandang {f.house.code} · Umur {d.age.label} ({d.age.days} hari) · Awal {fmtInt(f.initialPopulation)} ekor
             </p>
-            <p className="text-xs text-gray-400">Menetas {f.hatchDate?.slice(0, 10)} · Masuk {f.entryDate?.slice(0, 10)} · Supplier {f.sourceSupplier ?? "—"} · Perlakuan tercatat: {d.treatmentCount}</p>
+            <p className="text-xs text-gray-400">Menetas {f.hatchDate?.slice(0, 10)} · Masuk {f.entryDate?.slice(0, 10)}{f.actualCullDate ? ` · Nonaktif ${f.actualCullDate.slice(0, 10)}` : ""} · Supplier {f.sourceSupplier ?? "—"} · Recording: {d.recordCount} · Perlakuan tercatat: {d.treatmentCount}</p>
+            {f.notes && <p className="text-xs text-gray-500 mt-1">Catatan: {f.notes}</p>}
           </div>
-          <div className="flex gap-2">
-            {f.status === "PREPARATION" && <Button onClick={activate} disabled={busy}>Aktifkan</Button>}
-            {f.status === "ACTIVE" && <>
-              <Button variant="outline" onClick={() => complete("COMPLETED")} disabled={busy}>Selesaikan</Button>
-              <Button variant="danger" onClick={() => complete("CULLED")} disabled={busy}>Afkir</Button>
-            </>}
-          </div>
+          {canManageFlocks && (
+            <div className="flex flex-wrap gap-2">
+              {f.status === "PREPARATION" && <Button onClick={activate} disabled={busy}>Aktifkan</Button>}
+              <Button variant="outline" onClick={() => setDialog("edit")}>Edit</Button>
+              {f.status === "ACTIVE" && <Button variant="danger" onClick={() => setDialog("deactivate")}>Nonaktifkan</Button>}
+              {(f.status === "COMPLETED" || f.status === "CULLED") && (
+                <Button variant="outline" onClick={() => setDialog("reopen")}>Aktifkan kembali</Button>
+              )}
+              {d.recordCount === 0 && d.treatmentCount === 0 && (
+                <Button variant="danger" onClick={() => setDialog("delete")}>Hapus</Button>
+              )}
+            </div>
+          )}
         </div>
       </Card>
 

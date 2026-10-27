@@ -21,18 +21,40 @@ export interface RecordingResult {
   warnings: string[];
 }
 
-/** Data untuk mengisi form (prefill): flock aktif, umur, populasi awal, target. */
-export async function getPrefill(houseId: bigint, dateStr: string, principal: AuthPrincipal) {
+/**
+ * Data untuk mengisi form (prefill): flock, umur, populasi awal, target.
+ * Satu kandang bisa berisi beberapa flock aktif, jadi prefill dipilih per flock.
+ * `houseId` saja hanya diterima bila kandang berisi tepat satu flock aktif.
+ */
+export async function getPrefill(
+  sel: { flockId?: bigint; houseId?: bigint },
+  dateStr: string,
+  principal: AuthPrincipal,
+) {
   const date = new Date(`${dateStr}T00:00:00.000Z`);
-  const house = await prisma.house.findUnique({ where: { id: houseId } });
-  if (!house || house.deletedAt) throw notFound("Kandang tidak ditemukan");
-  requireFarmAccess(principal, house.farmId.toString());
 
-  const flock = await prisma.flock.findFirst({
-    where: { houseId, status: "ACTIVE", deletedAt: null },
-    include: { strain: true },
-  });
-  if (!flock) throw notFound("Tidak ada flock aktif pada kandang ini");
+  let flock;
+  if (sel.flockId) {
+    flock = await prisma.flock.findUnique({ where: { id: sel.flockId }, include: { strain: true, house: true } });
+    if (!flock || flock.deletedAt) throw notFound("Flock tidak ditemukan");
+    requireFarmAccess(principal, flock.farmId.toString());
+    if (flock.status !== "ACTIVE") throw validation("Flock tidak aktif; recording hanya untuk flock berstatus Aktif");
+  } else if (sel.houseId) {
+    const house = await prisma.house.findUnique({ where: { id: sel.houseId } });
+    if (!house || house.deletedAt) throw notFound("Kandang tidak ditemukan");
+    requireFarmAccess(principal, house.farmId.toString());
+    const actives = await prisma.flock.findMany({
+      where: { houseId: sel.houseId, status: "ACTIVE", deletedAt: null },
+      include: { strain: true, house: true },
+    });
+    if (actives.length === 0) throw notFound("Tidak ada flock aktif pada kandang ini");
+    if (actives.length > 1) {
+      throw validation(`Kandang ${house.code} berisi ${actives.length} flock aktif (${actives.map((f) => f.code).join(", ")}); pilih flock-nya`);
+    }
+    flock = actives[0];
+  } else {
+    throw validation("Parameter flockId wajib diisi");
+  }
 
   if (ageInDays(flock.hatchDate, date) < 0) throw validation("Tanggal lebih awal dari tanggal menetas");
   const age = computeAge(flock.hatchDate, date);
@@ -51,6 +73,7 @@ export async function getPrefill(houseId: bigint, dateStr: string, principal: Au
 
   return {
     flock: { id: flock.id.toString(), code: flock.code, strainId: flock.strainId.toString(), strain: flock.strain.name },
+    house: { id: flock.houseId.toString(), code: flock.house.code, name: flock.house.name },
     ageDays: age.days,
     ageWeek: age.weeks,
     ageLabel: age.label,

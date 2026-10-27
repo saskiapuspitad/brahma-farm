@@ -7,9 +7,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_record_per_day_active
   ON daily_records (flock_id, record_date)
   WHERE deleted_at IS NULL;
 
--- 2) Hanya satu flock aktif (assignment terbuka) per kandang.
-CREATE UNIQUE INDEX IF NOT EXISTS uq_active_assignment
-  ON house_assignments (house_id)
+-- 2) Satu kandang boleh berisi beberapa flock aktif (beda umur, mis. A1 & A2),
+--    tetapi satu flock hanya punya satu penempatan terbuka pada satu waktu.
+--    Index lama (satu flock aktif per kandang) dihapus bila masih ada.
+DROP INDEX IF EXISTS uq_active_assignment;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_open_assignment_per_flock
+  ON house_assignments (flock_id)
   WHERE end_date IS NULL;
 
 -- 3) CHECK integritas mutasi populasi (pertahanan lapis DB, selain validasi domain).
